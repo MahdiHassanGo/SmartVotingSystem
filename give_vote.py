@@ -48,8 +48,8 @@ def get_current_people_count():
 
 def process_face(frame, face):
     (x, y, w, h) = face
-    # Ensure minimum face size
-    if w < 100 or h < 100:
+    # Increase minimum face size for better quality
+    if w < 150 or h < 150:  # Increased from 100 to 150
         return None
     
     # Extract face ROI
@@ -61,7 +61,10 @@ def process_face(frame, face):
     # Apply histogram equalization for better contrast
     equalized_face = cv2.equalizeHist(gray_face)
     
-    return equalized_face
+    # Apply Gaussian blur to reduce noise
+    blurred_face = cv2.GaussianBlur(equalized_face, (5, 5), 0)
+    
+    return blurred_face
 
 def register_new_face():
     current_count = get_current_people_count()
@@ -69,13 +72,13 @@ def register_new_face():
         print(f"Maximum number of people ({MAX_PEOPLE}) already registered.")
         return False
 
-    # Validate Aadhar number
+    # Validate NID number
     while True:
-        name = input("Enter your 12-digit Aadhar number: ")
+        name = input("Enter your 12-digit NID number: ")
         if name.isdigit() and len(name) == 12:
             break
         else:
-            print("Invalid Aadhar number. Please try again.")
+            print("Invalid NID number. Please try again.")
 
     # Parameters for capturing frames
     faces_data = []
@@ -130,9 +133,9 @@ def register_new_face():
         faces_data = np.asarray(faces_data, dtype=np.uint8)
         faces_data = faces_data.reshape((frames_total, -1))
 
-        # Save Aadhar number and faces data
+        # Save NID number and faces data
         try:
-            # Save names (Aadhar numbers)
+            # Save names (NID numbers)
             names_file = 'data/names.pkl'
             if not os.path.exists(names_file):
                 names = [name] * frames_total
@@ -173,8 +176,8 @@ def initialize_voting_system():
         print("No registered faces found. Please register at least one face first.")
         return None, None
 
-    # Train the KNN model
-    knn = KNeighborsClassifier(n_neighbors=5)
+    # Train the KNN model with improved parameters
+    knn = KNeighborsClassifier(n_neighbors=3, weights='distance')  # Reduced neighbors and added distance weights
     knn.fit(FACES, LABELS)
     return knn, LABELS
 
@@ -268,43 +271,49 @@ def main():
                             
                             if processed_face is not None:
                                 resized_img = cv2.resize(processed_face, (50, 50)).flatten().reshape(1, -1)
-                                output = knn.predict(resized_img)[0]
-
-                                # Draw scanning box with animation
-                                box_color = (0, 255, 0) if int(time.time() * 2) % 2 == 0 else (0, 200, 0)
-                                cv2.rectangle(frame, (x, y), (x+w, y+h), box_color, 2)
-                                cv2.rectangle(frame, (x, y-40), (x+w, y), box_color, -1)
                                 
-                                # Display name and scanning status
-                                cv2.putText(frame, f"Scanning: {output}", (x, y-10), 
-                                          cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                                # Get prediction probabilities
+                                distances, indices = knn.kneighbors(resized_img)
+                                confidence = 1 / (1 + distances[0][0])  # Convert distance to confidence score
+                                
+                                if confidence > 0.6:  # Add confidence threshold
+                                    output = knn.predict(resized_img)[0]
+                                    
+                                    # Draw scanning box with animation
+                                    box_color = (0, 255, 0) if int(time.time() * 2) % 2 == 0 else (0, 200, 0)
+                                    cv2.rectangle(frame, (x, y), (x+w, y+h), box_color, 2)
+                                    cv2.rectangle(frame, (x, y-40), (x+w, y), box_color, -1)
+                                    
+                                    # Display name and confidence score
+                                    cv2.putText(frame, f"Scanning: {output} ({confidence:.2f})", (x, y-10), 
+                                              cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-                                # Check if the voter has already voted
-                                if check_if_exists(output):
-                                    speak(f"{output}, you have already voted.")
-                                else:
-                                    # Prompt for voting
-                                    speak(f"{output}, please cast your vote.")
-                                    while True:
-                                        # Read input from Arduino
-                                        if arduino.in_waiting > 0:
-                                            key = arduino.readline().decode('utf-8').strip()
-                                            if key == '1':
-                                                speak("Your vote for BAL has been recorded.")
-                                                record_vote(output, "BAL")
-                                                break
-                                            elif key == '2':
-                                                speak("Your vote for BNP has been recorded.")
-                                                record_vote(output, "BNP")
-                                                break
-                                            elif key == '3':
-                                                speak("Your vote for JAMAT has been recorded.")
-                                                record_vote(output, "JAMAT")
-                                                break
-                                            elif key == '4':
-                                                speak("Your vote has been canceled.")
-                                                break
-                                    break
+                                    # Check if the voter has already voted
+                                    if check_if_exists(output):
+                                        speak(f"{output}, you have already voted.")
+                                    else:
+                                        # Prompt for voting
+                                        speak(f"{output}, please cast your vote.")
+                                        while True:
+                                            # Read input from Arduino
+                                            if arduino.in_waiting > 0:
+                                                key = arduino.readline().decode('utf-8').strip()
+                                                if key == '1':
+                                                    speak("Your vote for AL has been recorded.")
+                                                    record_vote(output, "AL")
+                                                    break
+                                                elif key == '2':
+                                                    speak("Your vote for BNP has been recorded.")
+                                                    record_vote(output, "BNP")
+                                                    break
+                                                elif key == '3':
+                                                    speak("Your vote for JAMAT has been recorded.")
+                                                    record_vote(output, "JAMAT")
+                                                    break
+                                                elif key == '4':
+                                                    speak("Your vote has been canceled.")
+                                                    break
+                                        break
 
                         last_face_time = current_time
 
